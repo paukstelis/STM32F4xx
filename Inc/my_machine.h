@@ -38,6 +38,7 @@
 //#define BOARD_BTT_SKR_20_DAC      // F407 based 3D Printer board, uses analog output (DAC) for spindle speed control
 //#define BOARD_STM32F407VET6_DEV   // F407 based industrial control board
 //#define BOARD_FYSETC_S6           // F446 based 3D Printer board
+//#define BOARD_FLY_CDY_V3
 //#define BOARD_FLEXI_HAL           // F446 CNC board
 //#define BOARD_LONGBOARD32         // F412 Sienci SLB, onboard Trinamic drivers version
 //#define BOARD_LONGBOARD32_EXT     // F412 Sienci SLB, external drivers version

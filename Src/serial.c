@@ -99,6 +99,11 @@ static const io_stream_t *serial2Init(uint32_t baud_rate);
 #define UART0_RX_PIN 7
 #define UART0_PORT GPIOB
 #define UART0_AF GPIO_AF7_USART1
+#elif SERIAL_PORT == 12
+#define UART0_TX_PIN 11
+#define UART0_RX_PIN 12
+#define UART0_PORT GPIOA
+#define UART0_AF GPIO_AF7_USART1
 #elif SERIAL_PORT == 2
 #define UART0_TX_PIN 2
 #define UART0_RX_PIN 3

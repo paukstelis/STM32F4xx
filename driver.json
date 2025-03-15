@@ -205,6 +205,29 @@
       }
     },
     {
+      "name": "FLY-CDY-V3 STM32F407",
+      "symbol": "BOARD_FLY_CDY_V3",
+      "URL": "",
+      "MAP": "boards/fly-cdy-v3_map.h",
+      "caps": {
+        "uart": 0,
+        "axes": 5,
+        "serial_ports": 2,
+        "digital_in": 1,
+        "sdcard": 1,
+        "i2c": 1,
+        "trinamic_spi_cs": 1,
+        "trinamic_uart_n": 1,
+        "wiznet": 1,
+        "ldscript": "STM32F407VGTX_BL32K_FLASH.ld"
+      },
+      "symbols": {
+          "STM32F407xx": "",
+          "HSE_VALUE": 8000000,
+          "HAS_BOOTLOADER": ""
+      }
+    },
+    {
       "name": "BTT SKR-2 STM32F407 (Bootloader)",
       "symbol": "BOARD_BTT_SKR_20",
       "URL": "https://github.com/bigtreetech/SKR-2",

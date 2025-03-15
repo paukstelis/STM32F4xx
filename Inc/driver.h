@@ -152,6 +152,8 @@
   #include "boards/btt_skr_pro_v1_1_map.h"
 #elif defined(BOARD_BTT_SKR_20)
   #include "boards/btt_skr_2.0_map.h"
+#elif defined(BOARD_FLY_CDY_V3)
+  #include "boards/fly-cdy-v3_map.h"
 #elif defined(BOARD_BTT_SKR_20_DAC)
   #include "boards/btt_skr_2.0_dac_map.h"
 #elif defined(BOARD_FYSETC_S6)
