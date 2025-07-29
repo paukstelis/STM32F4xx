@@ -19,13 +19,11 @@
   along with grblHAL. If not, see <http://www.gnu.org/licenses/>.
 */
 
-#define AUX_CONTROLS (AUX_CONTROL_SPINDLE|AUX_CONTROL_COOLANT|AUX_CONTROL_DEVICES)
-
 #if N_ABC_MOTORS > 2
 #error "Axis configuration is not supported!"
 #endif
 
-#if !defined(STM32F412Vx) || HSE_VALUE != 25000000
+#if !(defined(STM32F412Vx) && HSE_VALUE == 25000000) && !(defined(DEBUG) && IS_NUCLEO_DEVKIT == 144)
 #error "This board has STM32F412 processor with a 25MHz crystal, select a corresponding build!"
 #endif
 
@@ -41,11 +39,14 @@
 #endif
 #endif
 
-#if EEPROM_ENABLE || SLB_EEPROM_ENABLE
+#if (EEPROM_ENABLE || SLB_EEPROM_ENABLE) && !IS_NUCLEO_DEVKIT
 #undef I2C_ENABLE
 #undef EEPROM_ENABLE
 #define I2C_ENABLE 1
 #define EEPROM_ENABLE 128
+#endif
+
+#if I2C_ENABLE
 #define I2C_PORT 1
 #define I2C1_ALT_PINMAP 1
 #endif
@@ -54,10 +55,10 @@
 #define SERIAL1_PORT    21   // GPIOD: TX = 5,        RX = 6
 
 #define HAS_BOARD_INIT
-#define WIZCHIP_SPI_PRESCALER   SPI_BAUDRATEPRESCALER_2
-#define FATFS_SPI_PRESCALER     SPI_BAUDRATEPRESCALER_4
+#define WIZCHIP_SPI_PRESCALER   SPI_BAUDRATEPRESCALER_4
+#define FATFS_SPI_PRESCALER     SPI_BAUDRATEPRESCALER_8
 
-#ifdef BOARD_LONGBOARD32
+#if defined(BOARD_LONGBOARD32) && !IS_NUCLEO_DEVKIT
 #undef TRINAMIC_ENABLE
 #define TRINAMIC_ENABLE      2660
 #define TRINAMIC_SPI_PORT       2
@@ -315,8 +316,8 @@
 #define LED1_PIN                13
 #endif
 
-#define AUXINTPUT0_ANALOG_PORT  GPIOA
-#define AUXINTPUT0_ANALOG_PIN   0
+#define AUXINPUT0_ANALOG_PORT  GPIOA
+#define AUXINPUT0_ANALOG_PIN   0
 
 #define AUXINPUT0_PORT          GPIOD // AUX_IN_0
 #define AUXINPUT0_PIN           12
@@ -352,9 +353,13 @@
 #define AUXINPUT11_PORT         GPIOC // Probe
 #define AUXINPUT11_PIN          4
 
-// Define user-control controls (cycle start, reset, feed hold) input pins.
-#define RESET_PORT              GPIOB
-#define RESET_PIN               12
+#define AUXINPUT13_PORT         GPIOB //  // Reset/EStop
+#define AUXINPUT13_PIN          12
+
+#if CONTROL_ENABLE & CONTROL_HALT
+#define RESET_PORT              AUXINPUT13_PORT
+#define RESET_PIN               AUXINPUT13_PIN
+#endif
 
 #if SAFETY_DOOR_ENABLE
 #define SAFETY_DOOR_PORT        AUXINPUT9_PORT
@@ -365,6 +370,11 @@
 #if PROBE_ENABLE
 #define PROBE_PORT              AUXINPUT11_PORT
 #define PROBE_PIN               AUXINPUT11_PIN
+#endif
+
+#if TOOLSETTER_ENABLE
+#define TOOLSETTER_PORT         AUXINPUT3_PORT
+#define TOOLSETTER_PIN          AUXINPUT3_PIN
 #endif
 
 #if I2C_STROBE_ENABLE

@@ -30,12 +30,7 @@
 #include "driver.h"
 #include "serial.h"
 
-#define AUX_DEVICES // until all drivers are converted?
-#ifndef AUX_CONTROLS
-#define AUX_CONTROLS (AUX_CONTROL_SPINDLE|AUX_CONTROL_COOLANT|COPROC_PASSTHRU)
-#endif
-
-#include "grbl/protocol.h"
+#include "grbl/task.h"
 #include "grbl/motor_pins.h"
 #include "grbl/pin_bits_masks.h"
 #include "grbl/state_machine.h"
@@ -71,7 +66,7 @@
   #include <enet.h>
 #endif
 
-#define DRIVER_IRQMASK (LIMIT_MASK|CONTROL_MASK|DEVICES_IRQ_MASK)
+#define DRIVER_IRQMASK (LIMIT_MASK|DEVICES_IRQ_MASK)
 
 /* TODO: add support for IRQ driven fault inputs?
 #if DRIVER_IRQMASK & MOTOR_FAULT_MASK
@@ -79,7 +74,7 @@
 #endif
 */
 
-#if DRIVER_IRQMASK != (LIMIT_MASK_SUM+CONTROL_MASK_SUM+DEVICES_IRQ_MASK_SUM)
+#if DRIVER_IRQMASK != (LIMIT_MASK_SUM+DEVICES_IRQ_MASK_SUM)
 #error Interrupt enabled input pins must have unique pin numbers!
 #endif
 
@@ -135,7 +130,6 @@ static bool qei_enable = false;
 #include "grbl/spindle_sync.h"
 
 static spindle_data_t spindle_data;
-static spindle_sync_t spindle_tracker;
 static spindle_encoder_t spindle_encoder = {
     .tics_per_irq = 4
 };
@@ -152,10 +146,6 @@ static volatile uint32_t rpm_timer_ovf = 0;
 
 #endif // SPINDLE_ENCODER_ENABLE
 
-#if SPINDLE_SYNC_ENABLE
-static void stepperPulseStartSynchronized (stepper_t *stepper);
-#endif
-
 #if defined(LED_R_PIN) && defined(LED_G_PIN) && defined(LED_B_PIN)
 #define LED_RGB 1
 #else
@@ -165,19 +155,6 @@ static void stepperPulseStartSynchronized (stepper_t *stepper);
 static periph_signal_t *periph_pins = NULL;
 
 static input_signal_t inputpin[] = {
-#ifdef RESET_PIN
-#if ESTOP_ENABLE
-    { .id = Input_EStop,          .port = RESET_PORT,         .pin = RESET_PIN,           .group = PinGroup_Control },
-#else
-    { .id = Input_Reset,          .port = RESET_PORT,         .pin = RESET_PIN,           .group = PinGroup_Control },
-#endif
-#endif
-#ifdef FEED_HOLD_PIN
-    { .id = Input_FeedHold,       .port = FEED_HOLD_PORT,     .pin = FEED_HOLD_PIN,       .group = PinGroup_Control },
-#endif
-#ifdef CYCLE_START_PIN
-    { .id = Input_CycleStart,     .port = CYCLE_START_PORT,   .pin = CYCLE_START_PIN,     .group = PinGroup_Control },
-#endif
 // Limit input pins must be consecutive in this array
     { .id = Input_LimitX,         .port = X_LIMIT_PORT,       .pin = X_LIMIT_PIN,         .group = PinGroup_Limit },
 #ifdef X2_LIMIT_PIN
@@ -315,11 +292,20 @@ static input_signal_t inputpin[] = {
 #ifdef AUXINPUT12_PIN
     { .id = Input_Aux12,          .port = AUXINPUT12_PORT,    .pin = AUXINPUT12_PIN,      .group = PinGroup_AuxInput },
 #endif
-#ifdef AUXINTPUT0_ANALOG_PIN
-    { .id = Input_Analog_Aux0,    .port = AUXINTPUT0_ANALOG_PORT, .pin = AUXINTPUT0_ANALOG_PIN, .group = PinGroup_AuxInputAnalog },
+#ifdef AUXINPUT13_PIN
+    { .id = Input_Aux13,          .port = AUXINPUT13_PORT,    .pin = AUXINPUT13_PIN,      .group = PinGroup_AuxInput },
 #endif
-#ifdef AUXINTPUT1_ANALOG_PIN
-    { .id = Input_Analog_Aux1,    .port = AUXINTPUT1_ANALOG_PORT, .pin = AUXINTPUT1_ANALOG_PIN, .group = PinGroup_AuxInputAnalog }
+#ifdef AUXINPUT14_PIN
+    { .id = Input_Aux14,          .port = AUXINPUT14_PORT,    .pin = AUXINPUT14_PIN,      .group = PinGroup_AuxInput },
+#endif
+#ifdef AUXINPUT15_PIN
+    { .id = Input_Aux15,          .port = AUXINPUT15_PORT,    .pin = AUXINPUT15_PIN,      .group = PinGroup_AuxInput },
+#endif
+#ifdef AUXINPUT0_ANALOG_PIN
+    { .id = Input_Analog_Aux0,    .port = AUXINPUT0_ANALOG_PORT, .pin = AUXINPUT0_ANALOG_PIN, .group = PinGroup_AuxInputAnalog },
+#endif
+#ifdef AUXINPUT1_ANALOG_PIN
+    { .id = Input_Analog_Aux1,    .port = AUXINPUT1_ANALOG_PORT, .pin = AUXINPUT1_ANALOG_PIN, .group = PinGroup_AuxInputAnalog }
 #endif
 };
 
@@ -443,14 +429,6 @@ static output_signal_t outputpin[] = {
 #ifdef MOTOR_UARTM5_PIN
     { .id = Bidirectional_MotorUARTM5,  .port = MOTOR_UARTM5_PORT,  .pin = MOTOR_UARTM5_PIN,        .group = PinGroup_MotorUART },
 #endif
-#if !(AUX_CONTROLS & AUX_CONTROL_COOLANT)
-#ifdef COOLANT_FLOOD_PIN
-    { .id = Output_CoolantFlood,    .port = COOLANT_FLOOD_PORT,     .pin = COOLANT_FLOOD_PIN,       .group = PinGroup_Coolant },
-#endif
-#ifdef COOLANT_MIST_PORT
-    { .id = Output_CoolantMist,     .port = COOLANT_MIST_PORT,      .pin = COOLANT_MIST_PIN,        .group = PinGroup_Coolant },
-#endif
-#endif
 #ifdef FLASH_CS_PORT
     { .id = Output_FlashCS,         .port = FLASH_CS_PORT,          .pin = FLASH_CS_PIN,            .group = PinGroup_SPI },
 #endif
@@ -463,10 +441,10 @@ static output_signal_t outputpin[] = {
 #ifdef SPI_RST_PORT
     { .id = Output_SPIRST,          .port = SPI_RST_PORT,           .pin = SPI_RST_PIN,             .group = PinGroup_SPI },
 #endif
-#ifdef LED_PORT
+#if defined(LED_PORT) && defined(NEOPIXEL_GPO)
     { .id = Output_LED0_Adressable, .port = LED_PORT,               .pin = LED_PIN,                 .group = PinGroup_LED },
 #endif
-#ifdef LED1_PORT
+#if defined(LED1_PORT) && defined(NEOPIXEL_GPO)
     { .id = Output_LED1_Adressable, .port = LED1_PORT,              .pin = LED1_PIN,                .group = PinGroup_LED },
 #endif
 #ifdef LED_R_PORT
@@ -549,10 +527,17 @@ static pin_group_pins_t limit_inputs = {0}, motor_fault_inputs = {};
 static delay_t delay = { .ms = 1, .callback = NULL }; // NOTE: initial ms set to 1 for "resetting" systick timer on startup
 static input_signal_t *pin_irq[16] = {0};
 static struct {
-    uint32_t length;
-    uint32_t delay;
+    // t_* parameters are timer ticks
+    uint32_t t_min_period;
+    uint32_t t_on; // delayed pulse
+    uint32_t t_off;
+    uint32_t t_on_off_min;
+    uint32_t t_off_min;
+    uint32_t t_dly_off_min;
     axes_signals_t out;
 #if STEP_INJECT_ENABLE
+    uint32_t length;
+    uint32_t delay;
     struct {
         hal_timer_t timer;
         axes_signals_t claimed;
@@ -560,26 +545,17 @@ static struct {
         volatile axes_signals_t out;
     } inject;
 #endif
-} step_pulse = {0};
+} step_pulse = {};
 
 #ifdef Z_LIMIT_POLL
 static input_signal_t *z_limit_pin;
 static bool z_limits_irq_enabled = false;
 #endif
 
-#if AUX_CONTROLS_ENABLED
 #ifdef SAFETY_DOOR_PIN
 static pin_debounce_t debounce;
 #endif
 static void aux_irq_handler (uint8_t port, bool state);
-#endif
-
-#ifdef PROBE_PIN
-static uint8_t probe_port;
-static probe_state_t probe = {
-    .connected = On
-};
-#endif // PROBE_PIN
 
 #if defined(I2C_STROBE_PIN) || SPI_IRQ_BIT
 
@@ -685,28 +661,22 @@ static void stepperWakeUp (void)
 
     STEPPER_TIMER->ARR = hal.f_step_timer / 500; // ~2ms delay to allow drivers time to wake up.
     STEPPER_TIMER->EGR = TIM_EGR_UG;
-    STEPPER_TIMER->SR = ~TIM_SR_UIF;
+    STEPPER_TIMER->SR = 0;
+    STEPPER_TIMER->DIER = TIM_DIER_UIE;
     STEPPER_TIMER->CR1 |= TIM_CR1_CEN;
 }
 
-// Disables stepper driver interrupts
-static void stepperGoIdle (bool clear_signals)
-{
-    STEPPER_TIMER->CR1 &= ~TIM_CR1_CEN;
-    STEPPER_TIMER->CNT = 0;
-}
-
 // Sets up stepper driver interrupt timeout, "Normal" version
-static void stepperCyclesPerTick (uint32_t cycles_per_tick)
+ISR_CODE static void stepperCyclesPerTick (uint32_t cycles_per_tick)
 {
-    STEPPER_TIMER->ARR = cycles_per_tick < (1UL << 20) ? cycles_per_tick : 0x000FFFFFUL;
+    STEPPER_TIMER->ARR = cycles_per_tick < (1UL << 20) ? max(cycles_per_tick, step_pulse.t_min_period) : 0x000FFFFFUL;
 }
 
 // Set stepper pulse output pins
 // NOTE: step_outbits are: bit0 -> X, bit1 -> Y, bit2 -> Z...
 #ifdef SQUARING_ENABLED
 
-inline static __attribute__((always_inline)) void stepperSetStepOutputs (axes_signals_t step_out1)
+inline static __attribute__((always_inline)) void stepper_step_out (axes_signals_t step_out1)
 {
     axes_signals_t step_out2;
 
@@ -859,7 +829,7 @@ static void StepperDisableMotors (axes_signals_t axes, squaring_mode_t mode)
 
 #else // SQUARING DISABLED
 
-inline static __attribute__((always_inline)) void stepperSetStepOutputs (axes_signals_t step_out)
+inline static __attribute__((always_inline)) void stepper_step_out (axes_signals_t step_out)
 {
 #if STEP_INJECT_ENABLE
 
@@ -1011,11 +981,11 @@ static axes_signals_t getGangedAxes (bool auto_squared)
     return ganged;
 }
 
-#endif
+#endif // GANGING_ENABLED
 
 // Set stepper direction output pins
-// NOTE: see note for stepperSetStepOutputs()
-inline static __attribute__((always_inline)) void stepperSetDirOutputs (axes_signals_t dir_out)
+// NOTE: see note for stepper_step_out()
+inline static __attribute__((always_inline)) void stepper_dir_out (axes_signals_t dir_out)
 {
 #if STEP_INJECT_ENABLE
 
@@ -1143,148 +1113,79 @@ inline static __attribute__((always_inline)) void stepperSetDirOutputs (axes_sig
 #endif
 }
 
-// Sets stepper direction and pulse pins and starts a step pulse.
-static void stepperPulseStart (stepper_t *stepper)
+// Disables stepper driver interrupts
+static void stepperGoIdle (bool clear_signals)
 {
-#if SPINDLE_SYNC_ENABLE
-    if(stepper->new_block && stepper->exec_segment->spindle_sync) {
-        spindle_tracker.stepper_pulse_start_normal = hal.stepper.pulse_start;
-        hal.stepper.pulse_start = stepperPulseStartSynchronized;
-        hal.stepper.pulse_start(stepper);
-        return;
-    }
-#endif
+    STEPPER_TIMER->DIER &= ~TIM_DIER_UIE;
 
-    if(stepper->dir_change)
-        stepperSetDirOutputs(stepper->dir_outbits);
-
-    if(stepper->step_outbits.value) {
-        stepperSetStepOutputs(stepper->step_outbits);
-        PULSE_TIMER->CR1 |= TIM_CR1_CEN;
+    if(clear_signals) {
+        stepper_dir_out((axes_signals_t){0});
+        stepper_step_out((axes_signals_t){0});
     }
+}
+
+static inline __attribute__((always_inline)) void _stepper_step_out (axes_signals_t step_out)
+{
+    stepper_step_out(step_out);
+
+    if((STEPPER_TIMER->SR & TIM_SR_UIF) || STEPPER_TIMER->CNT < step_pulse.t_on_off_min) {
+        STEPPER_TIMER->CNT = step_pulse.t_on_off_min;
+        NVIC_ClearPendingIRQ(STEPPER_TIMER_IRQn);
+    }
+
+    STEPPER_TIMER->CCR1 = STEPPER_TIMER->CNT - step_pulse.t_off;
+    STEPPER_TIMER->SR = 0;
+    STEPPER_TIMER->DIER |= TIM_DIER_CC1IE;
+}
+
+// Sets stepper direction and pulse pins and starts a step pulse.
+ISR_CODE static void stepperPulseStart (stepper_t *stepper)
+{
+    if(stepper->dir_changed.bits) {
+        stepper->dir_changed.bits = 0;
+        stepper_dir_out(stepper->dir_out);
+    }
+
+    if(stepper->step_out.bits)
+        _stepper_step_out(stepper->step_out);
 }
 
 // Start a stepper pulse, delay version.
 // Note: delay is only added when there is a direction change and a pulse to be output.
-static void stepperPulseStartDelayed (stepper_t *stepper)
+ISR_CODE static void stepperPulseStartDelayed (stepper_t *stepper)
 {
-#if SPINDLE_SYNC_ENABLE
-    if(stepper->new_block && stepper->exec_segment->spindle_sync) {
-        spindle_tracker.stepper_pulse_start_normal = hal.stepper.pulse_start;
-        hal.stepper.pulse_start = stepperPulseStartSynchronized;
-        hal.stepper.pulse_start(stepper);
-        return;
-    }
-#endif
+    if(stepper->dir_changed.bits) {
 
-    if(stepper->dir_change) {
+        stepper_dir_out(stepper->dir_out);
 
-        stepperSetDirOutputs(stepper->dir_outbits);
+        if(stepper->step_out.bits) {
 
-        if(stepper->step_outbits.value) {
-            step_pulse.out = stepper->step_outbits; // Store out_bits
-            PULSE_TIMER->DIER = TIM_DIER_CC1IE;
-            PULSE_TIMER->CR1 |= TIM_CR1_CEN;
-        }
+            if(stepper->step_out.bits & stepper->dir_changed.bits) {
 
-    } else if(stepper->step_outbits.value) {
-        stepperSetStepOutputs(stepper->step_outbits);
-        PULSE_TIMER->DIER = TIM_DIER_UIE;
-        PULSE_TIMER->CR1 |= TIM_CR1_CEN;
-    }
-}
+                step_pulse.out = stepper->step_out; // Store out_bits
 
-#if SPINDLE_SYNC_ENABLE
-
-// Spindle sync version: sets stepper direction and pulse pins and starts a step pulse.
-// Switches back to "normal" version if spindle synchronized motion is finished.
-// TODO: add delayed pulse handling...
-static void stepperPulseStartSynchronized (stepper_t *stepper)
-{
-    static bool sync = false;
-    static float block_start;
-
-    if(stepper->new_block) {
-        if(!stepper->exec_segment->spindle_sync) {
-            PULSE_TIMER->ARR = step_pulse.length + step_pulse.delay;
-            hal.stepper.pulse_start = spindle_tracker.stepper_pulse_start_normal;
-            hal.stepper.pulse_start(stepper);
-            return;
-        }
-        sync = true;
-        PULSE_TIMER->ARR = step_pulse.length; // dir delay not supported
-        stepperSetDirOutputs(stepper->dir_outbits);
-        spindle_tracker.programmed_rate = stepper->exec_block->programmed_rate;
-        spindle_tracker.steps_per_mm = stepper->exec_block->steps_per_mm;
-        spindle_tracker.segment_id = 0;
-        spindle_tracker.prev_pos = 0.0f;
-        block_start = stepper->exec_block->spindle->get_data(SpindleData_AngularPosition)->angular_position * spindle_tracker.programmed_rate;
-        pidf_reset(&spindle_tracker.pid);
-#ifdef PID_LOG
-        sys.pid_log.idx = 0;
-        sys.pid_log.setpoint = 100.0f;
-#endif
-    }
-
-    if(stepper->step_outbits.value) {
-        stepperSetStepOutputs(stepper->step_outbits);
-        PULSE_TIMER->DIER = TIM_DIER_UIE;
-        PULSE_TIMER->CR1 |= TIM_CR1_CEN;
-    }
-
-    if(spindle_tracker.segment_id != stepper->exec_segment->id) {
-
-        spindle_tracker.segment_id = stepper->exec_segment->id;
-
-        if(!stepper->new_block) {  // adjust this segments total time for any positional error since last segment
-
-            float actual_pos;
-
-            if(stepper->exec_segment->cruising) {
-
-                float dt = (float)hal.f_step_timer / (float)(stepper->exec_segment->cycles_per_tick * stepper->exec_segment->n_step);
-                actual_pos = stepper->exec_block->spindle->get_data(SpindleData_AngularPosition)->angular_position * spindle_tracker.programmed_rate;
-
-                if(sync) {
-                    spindle_tracker.pid.sample_rate_prev = dt;
-//                    spindle_tracker.block_start += (actual_pos - spindle_tracker.block_start) - spindle_tracker.prev_pos;
-//                    spindle_tracker.block_start += spindle_tracker.prev_pos;
-                    sync = false;
+                if(STEPPER_TIMER->CNT < step_pulse.t_dly_off_min) {
+                    STEPPER_TIMER->CNT = step_pulse.t_dly_off_min;
+                    NVIC_ClearPendingIRQ(STEPPER_TIMER_IRQn);
                 }
 
-                actual_pos -= block_start;
-                int32_t step_delta = (int32_t)(pidf(&spindle_tracker.pid, spindle_tracker.prev_pos, actual_pos, dt) * spindle_tracker.steps_per_mm);
-                int32_t ticks = (((int32_t)stepper->step_count + step_delta) * (int32_t)stepper->exec_segment->cycles_per_tick) / (int32_t)stepper->step_count;
+                STEPPER_TIMER->CCR2 = STEPPER_TIMER->CNT - step_pulse.t_on;
 
-                stepper->exec_segment->cycles_per_tick = (uint32_t)max(ticks, spindle_tracker.min_cycles_per_tick >> stepper->exec_segment->amass_level);
+                STEPPER_TIMER->SR = 0;
+                STEPPER_TIMER->DIER |= TIM_DIER_CC2IE;
 
-                stepperCyclesPerTick(stepper->exec_segment->cycles_per_tick);
-           } else
-                actual_pos = spindle_tracker.prev_pos;
-
-#ifdef PID_LOG
-            if(sys.pid_log.idx < PID_LOG) {
-
-                sys.pid_log.target[sys.pid_log.idx] = spindle_tracker.prev_pos;
-                sys.pid_log.actual[sys.pid_log.idx] = actual_pos; // - spindle_tracker.prev_pos;
-
-            //    spindle_tracker.log[sys.pid_log.idx] = STEPPER_TIMER->BGLOAD << stepper->amass_level;
-            //    spindle_tracker.pos[sys.pid_log.idx] = stepper->exec_segment->cycles_per_tick  stepper->amass_level;
-            //    spindle_tracker.pos[sys.pid_log.idx] = stepper->exec_segment->cycles_per_tick * stepper->step_count;
-            //    STEPPER_TIMER->BGLOAD = STEPPER_TIMER->LOAD;
-
-             //   spindle_tracker.pos[sys.pid_log.idx] = spindle_tracker.prev_pos;
-
-                sys.pid_log.idx++;
-            }
-#endif
+            } else
+                _stepper_step_out(stepper->step_out);
         }
 
-        spindle_tracker.prev_pos = stepper->exec_segment->target_position;
-    }
-}
+        stepper->dir_changed.bits = 0;
 
-#endif // SPINDLE_SYNC_ENABLE
+        return;
+    }
+
+    if(stepper->step_out.bits)
+        _stepper_step_out(stepper->step_out);
+}
 
 #if STEP_INJECT_ENABLE
 
@@ -1364,7 +1265,7 @@ static void stepperClaimMotor (uint_fast8_t axis_id, bool claim)
     }
 }
 
-void stepperOutputStep (axes_signals_t step_out, axes_signals_t dir_out)
+ISR_CODE void stepperOutputStep (axes_signals_t step_out, axes_signals_t dir_out)
 {
     if(step_out.bits) {
 
@@ -1629,17 +1530,13 @@ inline static home_signals_t homeGetState (void)
 // Each bitfield bit indicates a control signal, where triggered is 1 and not triggered is 0.
 static control_signals_t systemGetState (void)
 {
-    control_signals_t signals;
+    control_signals_t signals = { settings.control_invert.mask };
 
-    signals.mask = settings.control_invert.mask;
-
-#if CONTROL_INMODE == GPIO_BITBAND
-#ifdef RESET_PIN
-  #if ESTOP_ENABLE
-    signals.e_stop = DIGITAL_IN(RESET_PORT, RESET_PIN);
-  #else
+#if defined(RESET_PIN) && !ESTOP_ENABLE
     signals.reset = DIGITAL_IN(RESET_PORT, RESET_PIN);
-  #endif
+#endif
+#if defined(RESET_PIN) && ESTOP_ENABLE
+    signals.e_stop = DIGITAL_IN(RESET_PORT, RESET_PIN);
 #endif
 #ifdef FEED_HOLD_PIN
     signals.feed_hold = DIGITAL_IN(FEED_HOLD_PORT, FEED_HOLD_PIN);
@@ -1647,65 +1544,34 @@ static control_signals_t systemGetState (void)
 #ifdef CYCLE_START_PIN
     signals.cycle_start = DIGITAL_IN(CYCLE_START_PORT, CYCLE_START_PIN);
 #endif
-#elif CONTROL_INMODE == GPIO_MAP
-    uint32_t bits = CONTROL_PORT->IDR;
-#if ESTOP_ENABLE
-    signals.e_stop = !!(bits & RESET_BIT);
-#else
-    signals.reset = !!(bits & RESET_BIT);
-#endif
-    signals.feed_hold = !!(bits & FEED_HOLD_BIT);
-    signals.cycle_start = !!(bits & CYCLE_START_BIT);
-  #ifdef SAFETY_DOOR_PIN
-    signals.safety_door_ajar = !!(bits & SAFETY_DOOR_BIT);
-  #endif
-#else
-    signals.value &= ~(CONTROL_MASK >> CONTROL_INMODE);
-    signals.value |= (uint16_t)((CONTROL_PORT->IDR & CONTROL_MASK) >> CONTROL_INMODE);
-  #if ESTOP_ENABLE
-    signals.e_stop = signals.reset;
-    signals.reset = settings.control_invert.reset;
-  #endif
-#endif
-
-#if AUX_CONTROLS_ENABLED
-
-  #ifdef SAFETY_DOOR_PIN
+#ifdef SAFETY_DOOR_PIN
     if(debounce.safety_door)
         signals.safety_door_ajar = !settings.control_invert.safety_door_ajar;
     else
-        signals.safety_door_ajar = DIGITAL_IN(SAFETY_DOOR_PORT, SAFETY_DOOR_PIN);
-  #endif
-  #ifdef MOTOR_FAULT_PIN
+        signals.safety_door_ajar = DIGITAL_IN(SAFETY_DOOR_PORT, SAFETY_DOOR_PIN);;
+#endif
+#ifdef MOTOR_FAULT_PIN
     signals.motor_fault = DIGITAL_IN(MOTOR_FAULT_PORT, MOTOR_FAULT_PIN);
-  #endif
-  #ifdef MOTOR_WARNING_PIN
+#endif
+#ifdef MOTOR_WARNING_PIN
     signals.motor_warning = DIGITAL_IN(MOTOR_WARNING_PORT, MOTOR_WARNING_PIN);
-  #endif
+#endif
 
     if(settings.control_invert.mask)
         signals.value ^= settings.control_invert.mask;
 
-  #if AUX_CONTROLS_SCAN
-    signals = aux_ctrl_scan_status(signals);
-  #endif
-
-#else
-    if(settings.control_invert.mask)
-        signals.value ^= settings.control_invert.mask;
-
-#endif // AUX_CONTROLS_ENABLED
-
-
-    return signals;
+    return aux_ctrl_scan_status(signals);
 }
 
-#ifdef PROBE_PIN
+#if DRIVER_PROBES
+
+static probe_state_t probe_state = { .connected = On };
+static probe_t probes[DRIVER_PROBES], *probe = &probes[0];
 
 // Toggle probe connected status. Used when no input pin is available.
 static void probeConnectedToggle (void)
 {
-    probe.connected = !probe.connected;
+    probe->flags.connected = !probe_state.connected;
 }
 
 // Sets up the probe pin invert mask to
@@ -1713,33 +1579,105 @@ static void probeConnectedToggle (void)
 // and the probing cycle modes for toward-workpiece/away-from-workpiece.
 static void probeConfigure (bool is_probe_away, bool probing)
 {
-    probe.inverted = is_probe_away ? !settings.probe.invert_probe_pin : settings.probe.invert_probe_pin;
+    bool invert;
 
-    if(hal.signals_cap.probe_triggered) {
-        probe.is_probing = Off;
-        probe.triggered = hal.probe.get_state().triggered;
-        pin_irq_mode_t irq_mode = probing && !probe.triggered ? (probe.inverted ? IRQ_Mode_Falling : IRQ_Mode_Rising) : IRQ_Mode_None;
-        probe.irq_enabled = hal.port.register_interrupt_handler(probe_port, irq_mode, aux_irq_handler) && irq_mode != IRQ_Mode_None;
+    switch((probe_id_t)probe->probe_id) {
+#if TOOLSETTER_ENABLE
+        case Probe_Toolsetter:
+            invert = settings.probe.invert_toolsetter_input;
+            break;
+#endif
+#if PROBE2_ENABLE
+        case Probe_2:
+            invert = settings.probe.invert_probe2_input;
+            break;
+#endif
+        default: // Probe_Default
+            invert = settings.probe.invert_probe_pin;
+            break;
     }
 
-    if(!probe.irq_enabled)
-        probe.triggered = Off;
+    probe_state.inverted = is_probe_away ? !invert : invert;
 
-    probe.is_probing = probing;
+    if(probe->flags.latchable) {
+        probe_state.is_probing = Off;
+        probe_state.triggered = hal.probe.get_state().triggered;
+        pin_irq_mode_t irq_mode = probing && !probe_state.triggered ? (probe_state.inverted ? IRQ_Mode_Falling : IRQ_Mode_Rising) : IRQ_Mode_None;
+        probe_state.irq_enabled = ioport_enable_irq(probe->port, irq_mode, aux_irq_handler) && irq_mode != IRQ_Mode_None;
+    }
+
+    if(!probe_state.irq_enabled)
+        probe_state.triggered = Off;
+
+    probe_state.is_probing = probing;
 }
 
 // Returns the probe connected and triggered pin states.
 static probe_state_t probeGetState (void)
 {
-    probe_state_t state = {0};
+    probe_state_t state = {};
 
-    state.connected = probe.connected;
-    state.triggered = probe.is_probing && probe.irq_enabled ? probe.triggered : DIGITAL_IN(PROBE_PORT, PROBE_PIN) ^ probe.inverted;
+    state.probe_id  = probe->probe_id;
+    state.connected = probe->flags.connected;
+
+    if(probe_state.is_probing && probe_state.irq_enabled)
+        state.triggered = probe_state.triggered;
+    else
+        state.triggered = DIGITAL_IN(((input_signal_t *)probe->input)->port, ((input_signal_t *)probe->input)->pin) ^ probe_state.inverted;
 
     return state;
 }
 
-#endif // PROBE_PIN
+static bool probeSelect (probe_id_t probe_id)
+{
+    bool ok = false;
+    uint_fast8_t i = sizeof(probes) / sizeof(probe_t);
+
+    if(!probe_state.is_probing) do {
+        i--;
+        if((ok = probes[i].probe_id == probe_id && probes[i].input)) {
+            probe = &probes[i];
+            hal.probe.configure(false, false);
+            break;
+        }
+    } while(i);
+
+    return ok;
+}
+
+static bool probe_add (probe_id_t probe_id, uint8_t port, pin_irq_mode_t irq_mode, void *input)
+{
+    static uint_fast8_t i = 0;
+
+    if(i >= sizeof(probes) / sizeof(probe_t))
+        return false;
+
+    bool can_latch;
+
+    if(!(can_latch = (irq_mode & IRQ_Mode_RisingFalling) == IRQ_Mode_RisingFalling))
+        hal.signals_cap.probe_triggered = Off;
+    else if(i == 0)
+        hal.signals_cap.probe_triggered = On;
+
+    probes[i].probe_id = probe_id;
+    probes[i].port = port;
+    probes[i].flags.connected = probe_state.connected;
+    probes[i].flags.latchable = can_latch;
+    probes[i].flags.watchable = !!(irq_mode & IRQ_Mode_Change);
+    probes[i++].input = input;
+
+    hal.driver_cap.probe_pull_up = On;
+    hal.probe.get_state = probeGetState;
+    hal.probe.configure = probeConfigure;
+    hal.probe.connected_toggle = probeConnectedToggle;
+
+    if(i == 1)
+        hal.probe.select = probeSelect;
+
+    return true;
+}
+
+#endif // DRIVER_PROBES
 
 #ifdef MPG_MODE_PIN
 
@@ -1756,19 +1694,25 @@ static void mpg_enable (void *data)
 
 #endif // MPG_MODE_PIN
 
-#if AUX_CONTROLS_ENABLED
-
 static void aux_irq_handler (uint8_t port, bool state)
 {
     aux_ctrl_t *pin;
-    control_signals_t signals = {0};
+    control_signals_t signals = {};
 
     if((pin = aux_ctrl_get_pin(port))) {
         switch(pin->function) {
-#ifdef PROBE_PIN
+#if DRIVER_PROBES
+  #if PROBE_ENABLE
             case Input_Probe:
-                if(probe.is_probing) {
-                    probe.triggered = On;
+  #endif
+  #if PROBE2_ENABLE
+            case Input_Probe2:
+  #endif
+  #if TOOLSETTER_ENABLE
+            case Input_Toolsetter:
+  #endif
+                if(probe_state.is_probing) {
+                    probe_state.triggered = On;
                     return;
                 } else
                     signals.probe_triggered = On;
@@ -1787,14 +1731,14 @@ static void aux_irq_handler (uint8_t port, bool state)
 #endif
 #ifdef MPG_MODE_PIN
             case Input_MPGSelect:
-                protocol_enqueue_foreground_task(mpg_select, NULL);
+                task_add_immediate(mpg_select, NULL);
                 break;
 #endif
             default:
                 break;
         }
         signals.mask |= pin->cap.mask;
-        if(pin->irq_mode == IRQ_Mode_Change && pin->function != Input_Probe)
+        if(!signals.probe_triggered && pin->irq_mode == IRQ_Mode_Change)
             signals.deasserted = hal.port.wait_on_input(Port_Digital, pin->aux_port, WaitMode_Immediate, 0.0f) == 0;
     }
 
@@ -1807,29 +1751,121 @@ static void aux_irq_handler (uint8_t port, bool state)
 
 static bool aux_claim_explicit (aux_ctrl_t *aux_ctrl)
 {
-    if(ioport_claim(Port_Digital, Port_Input, &aux_ctrl->aux_port, NULL)) {
-        ioport_assign_function(aux_ctrl, &((input_signal_t *)aux_ctrl->input)->id);
-#ifdef PROBE_PIN
-        if(aux_ctrl->function == Input_Probe) {
-            probe_port = aux_ctrl->aux_port;
-            hal.probe.get_state = probeGetState;
-            hal.probe.configure = probeConfigure;
-            hal.probe.connected_toggle = probeConnectedToggle;
-            hal.driver_cap.probe_pull_up = On;
-            hal.signals_cap.probe_triggered = hal.driver_cap.probe_latch = aux_ctrl->irq_mode != IRQ_Mode_None;
-        }
-#endif
-#if defined(SAFETY_DOOR_PIN) || defined(QEI_SELECT_PIN)
-        if(aux_ctrl->function == Input_SafetyDoor || aux_ctrl->function == Input_QEI_Select)
-            ((input_signal_t *)aux_ctrl->input)->mode.debounce = On;
-#endif
-    } else
-        aux_ctrl->aux_port = 0xFF;
+    xbar_t *pin;
 
-    return aux_ctrl->aux_port != 0xFF;
+    if(aux_ctrl->input == NULL) {
+
+        uint_fast8_t i = sizeof(inputpin) / sizeof(input_signal_t);
+
+        do {
+            --i;
+            if(inputpin[i].group == PinGroup_AuxInput && inputpin[i].user_port == aux_ctrl->aux_port)
+                aux_ctrl->input = &inputpin[i];
+        } while(i && aux_ctrl->input == NULL);
+    }
+
+    if(aux_ctrl->input && (pin = ioport_claim(Port_Digital, Port_Input, &aux_ctrl->aux_port, NULL))) {
+
+        ioport_set_function(pin, aux_ctrl->function, &aux_ctrl->cap);
+
+        switch(aux_ctrl->function) {
+#if PROBE_ENABLE
+            case Input_Probe:
+                hal.driver_cap.probe = probe_add(Probe_Default, aux_ctrl->aux_port, pin->cap.irq_mode, aux_ctrl->input);
+                break;
+#endif
+#if PROBE2_ENABLE
+            case Input_Probe2:
+                hal.driver_cap.probe2 = probe_add(Probe_2, aux_ctrl->aux_port, pin->cap.irq_mode, aux_ctrl->input);
+                break;
+
+#endif
+#if TOOLSETTER_ENABLE
+            case Input_Toolsetter:
+                hal.driver_cap.toolsetter = probe_add(Probe_Toolsetter, aux_ctrl->aux_port, pin->cap.irq_mode, aux_ctrl->input);
+                break;
+#endif
+#if SAFETY_DOOR_ENABLE || defined(QEI_SELECT_PIN) || (defined(RESET_PIN) && !ESTOP_ENABLE)
+  #if defined(RESET_PIN) && !ESTOP_ENABLE
+            case Input_Reset:
+  #endif
+  #if SAFETY_DOOR_ENABLE
+            case Input_SafetyDoor:
+  #endif
+  #ifdef QEI_SELECT_PIN
+            case Input_QEI_Select:
+  #endif
+                ((input_signal_t *)aux_ctrl->input)->mode.debounce = ((input_signal_t *)aux_ctrl->input)->cap.debounce && hal.driver_cap.software_debounce;
+                break;
+#endif
+            default: break;
+        }
+    } else
+        aux_ctrl->aux_port = IOPORT_UNASSIGNED;
+
+    return aux_ctrl->aux_port != IOPORT_UNASSIGNED;
 }
 
-#endif // AUX_CONTROLS_ENABLED
+static void aux_assign_irq (void)
+{
+    uint32_t i, j, irq = 0;
+    input_signal_t *input, *input2;
+    aux_ctrl_t *aux;
+    pin_group_pins_t aux_digital_in = {};
+
+    const control_signals_t main_signals = { .reset = On, .e_stop = On, .feed_hold = On, .cycle_start = On };
+
+    for(i = 0; i < sizeof(inputpin) / sizeof(input_signal_t); i++) {
+
+        input = &inputpin[i];
+
+        if(input->group == PinGroup_AuxInput) {
+
+            input->bit = 1 << input->pin;
+
+            if(aux_digital_in.pins.inputs == NULL)
+                aux_digital_in.pins.inputs = input;
+
+            input->user_port = aux_digital_in.n_pins++;
+            input->id = (pin_function_t)(Input_Aux0 + input->user_port);
+            input->mode.pull_mode = PullMode_Up;
+            input->cap.pull_mode = PullMode_UpDown;
+            input->cap.irq_mode = (DRIVER_IRQMASK & input->bit) ? IRQ_Mode_None : IRQ_Mode_Edges;
+
+            aux = aux_ctrl_get_fn(input->port, input->pin);
+
+            if(input->cap.irq_mode == IRQ_Mode_None) {
+                if(aux && aux_ctrl_is_probe(aux->function))
+                    input->id = aux->function;
+            } else {
+
+                if(aux)
+                    input->id = aux->function;
+
+                if(irq & input->bit) { // duplicate IRQ
+
+                    if(aux == NULL)
+                        input->cap.irq_mode = IRQ_Mode_None;
+                    else for(j = 0; j < aux_digital_in.n_pins - 1; j++) {
+                        input2 = &aux_digital_in.pins.inputs[j];
+                        if(input->pin == input2->pin) {
+                            if(input->id < input2->id || (aux->cap.bits & main_signals.bits)) {
+                                input2->cap.irq_mode = IRQ_Mode_None;
+                                if(!aux_ctrl_is_probe(input2->id))
+                                    input2->id = (pin_function_t)(Input_Aux0 + input2->user_port);
+                            } else {
+                                input->cap.irq_mode = IRQ_Mode_None;
+                                if(!aux_ctrl_is_probe(input->id))
+                                    input->id = (pin_function_t)(Input_Aux0 + input->user_port);
+                            }
+                        }
+                    }
+                } else
+                    irq |= input->bit;
+            }
+        }
+    }
+}
 
 #if SPINDLE_ENCODER_ENABLE
 
@@ -2079,8 +2115,7 @@ void settings_changed (settings_t *settings, settings_changed_flags_t changed)
             .Speed = GPIO_SPEED_FREQ_HIGH
         };
 
-        stepperSetStepOutputs((axes_signals_t){0});
-        stepperSetDirOutputs((axes_signals_t){0});
+        hal.stepper.go_idle(true);
 
 #ifdef SQUARING_ENABLED
         hal.stepper.disable_motors((axes_signals_t){0}, SquaringMode_Both);
@@ -2095,32 +2130,28 @@ void settings_changed (settings_t *settings, settings_changed_flags_t changed)
 
         static bool event_claimed = false;
 
-        spindle_tracker.min_cycles_per_tick = hal.f_step_timer / (uint32_t)(settings->axis[Z_AXIS].max_rate * settings->axis[Z_AXIS].steps_per_mm / 60.0f);
+        if((hal.spindle_data.get = settings->spindle.ppr > 0 ? spindleGetData : NULL)) {
+            if(spindle_encoder.ppr != settings->spindle.ppr) {
 
-        if((hal.spindle_data.get = settings->spindle.ppr > 0 ? spindleGetData : NULL) &&
-            (spindle_encoder.ppr != settings->spindle.ppr || pidf_config_changed(&spindle_tracker.pid, &settings->position.pid))) {
+                spindle_ptrs_t *spindle;
 
-            spindle_ptrs_t *spindle;
+                hal.spindle_data.reset = spindleDataReset;
+                if((spindle = spindle_get(0)))
+                    spindle->set_state(spindle, (spindle_state_t){0}, 0.0f);
 
-            hal.spindle_data.reset = spindleDataReset;
-            if((spindle = spindle_get(0)))
-                spindle->set_state(spindle, (spindle_state_t){0}, 0.0f);
+                if(!event_claimed) {
+                    event_claimed = true;
+                    on_spindle_programmed = grbl.on_spindle_programmed;
+                    grbl.on_spindle_programmed = onSpindleProgrammed;
+                }
 
-            pidf_init(&spindle_tracker.pid, &settings->position.pid);
-
-            if(!event_claimed) {
-                event_claimed = true;
-                on_spindle_programmed = grbl.on_spindle_programmed;
-                grbl.on_spindle_programmed = onSpindleProgrammed;
+                spindle_encoder.ppr = settings->spindle.ppr;
+                spindle_encoder.tics_per_irq = max(1, spindle_encoder.ppr / 32);
+                spindle_encoder.pulse_distance = 1.0f / spindle_encoder.ppr;
+                spindle_encoder.maximum_tt = 250000UL / RPM_TIMER_RESOLUTION; // 250ms
+                spindle_encoder.rpm_factor = (60.0f * 1000000.0f / RPM_TIMER_RESOLUTION) / (float)spindle_encoder.ppr;
+                spindleDataReset();
             }
-
-            spindle_encoder.ppr = settings->spindle.ppr;
-            spindle_encoder.tics_per_irq = max(1, spindle_encoder.ppr / 32);
-            spindle_encoder.pulse_distance = 1.0f / spindle_encoder.ppr;
-            spindle_encoder.maximum_tt = 250000UL / RPM_TIMER_RESOLUTION; // 250ms
-            spindle_encoder.rpm_factor = (60.0f * 1000000.0f / RPM_TIMER_RESOLUTION) / (float)spindle_encoder.ppr;
-            spindleDataReset();
-
         } else {
             spindle_encoder.ppr = 0;
             hal.spindle_data.reset = NULL;
@@ -2130,21 +2161,21 @@ void settings_changed (settings_t *settings, settings_changed_flags_t changed)
 
 #endif // SPINDLE_ENCODER_ENABLE
 
-        step_pulse.length = (uint32_t)(10.0f * (settings->steppers.pulse_microseconds - STEP_PULSE_LATENCY)) - 1;
+        float sl = (float)hal.f_step_timer / 1000000.0f;
 
         if(hal.driver_cap.step_pulse_delay && settings->steppers.pulse_delay_microseconds > 0.0f) {
-            step_pulse.delay = (uint32_t)(10.0f * settings->steppers.pulse_delay_microseconds) - 1;
-            if(step_pulse.delay > (uint32_t)(10.0f * STEP_PULSE_LATENCY))
-                step_pulse.delay = max(10, step_pulse.delay - (uint32_t)(10.0f * STEP_PULSE_LATENCY));
+            step_pulse.t_on = (uint32_t)ceilf(sl * (max(STEP_PULSE_TOFF_MIN, settings->steppers.pulse_delay_microseconds) - STEP_PULSE_TOFF_LATENCY));
             hal.stepper.pulse_start = stepperPulseStartDelayed;
         } else {
-            step_pulse.delay = 0;
+            step_pulse.t_on = 0;
             hal.stepper.pulse_start = stepperPulseStart;
         }
 
-        PULSE_TIMER->DIER = TIM_DIER_UIE;
-        PULSE_TIMER->CCR1 = step_pulse.delay ? step_pulse.length : 0;
-        PULSE_TIMER->ARR = step_pulse.length + step_pulse.delay;
+        step_pulse.t_min_period = (uint32_t)ceilf(sl * (settings->steppers.pulse_microseconds + STEP_PULSE_TOFF_MIN));
+        step_pulse.t_off = (uint32_t)ceilf(sl * (settings->steppers.pulse_microseconds - STEP_PULSE_TOFF_LATENCY));
+        step_pulse.t_off_min = (uint32_t)ceilf(sl * (STEP_PULSE_TOFF_MIN - STEP_PULSE_TON_LATENCY));
+        step_pulse.t_on_off_min = step_pulse.t_off + step_pulse.t_off_min;
+        step_pulse.t_dly_off_min = step_pulse.t_on + step_pulse.t_on_off_min;
 
 #if STEP_INJECT_ENABLE
 
@@ -2154,6 +2185,15 @@ void settings_changed (settings_t *settings, settings_changed_flags_t changed)
         };
         step_inject_cfg.irq0_callback = step_pulse.delay ? step_inject_on : NULL;
         step_inject_cfg.irq0 = step_pulse.delay;
+
+        step_pulse.length = (uint32_t)(10.0f * (settings->steppers.pulse_microseconds - STEP_PULSE_LATENCY)) - 1;
+
+        if(hal.driver_cap.step_pulse_delay && settings->steppers.pulse_delay_microseconds > 0.0f) {
+            step_pulse.delay = (uint32_t)(10.0f * settings->steppers.pulse_delay_microseconds) - 1;
+            if(step_pulse.delay > (uint32_t)(10.0f * STEP_PULSE_LATENCY))
+                step_pulse.delay = max(10, step_pulse.delay - (uint32_t)(10.0f * STEP_PULSE_LATENCY));
+        } else
+            step_pulse.delay = 0;
 
         hal.timer.configure(step_pulse.inject.timer, &step_inject_cfg);
 
@@ -2188,9 +2228,6 @@ void settings_changed (settings_t *settings, settings_changed_flags_t changed)
         uint32_t i = sizeof(inputpin) / sizeof(input_signal_t);
         input_signal_t *input;
 
-        control_signals_t control_fei;
-        control_fei.mask = settings->control_disable_pullup.mask ^ settings->control_invert.mask;
-
         axes_signals_t limit_fei;
         limit_fei.mask = settings->limits.disable_pullup.mask ^ settings->limits.invert.mask;
 
@@ -2205,31 +2242,6 @@ void settings_changed (settings_t *settings, settings_changed_flags_t changed)
                 input->mode.irq_mode = IRQ_Mode_None;
 
             switch(input->id) {
-
-                case Input_Reset:
-                    input->mode.pull_mode = settings->control_disable_pullup.reset ? PullMode_None : PullMode_Up;
-                    input->mode.irq_mode = control_fei.reset ? IRQ_Mode_Falling : IRQ_Mode_Rising;
-                    break;
-
-                case Input_EStop:
-                    input->mode.pull_mode = settings->control_disable_pullup.e_stop ? PullMode_None : PullMode_Up;
-                    input->mode.irq_mode = control_fei.e_stop ? IRQ_Mode_Falling : IRQ_Mode_Rising;
-                    break;
-
-                case Input_FeedHold:
-                    input->mode.pull_mode = settings->control_disable_pullup.feed_hold ? PullMode_None : PullMode_Up;
-                    input->mode.irq_mode = control_fei.feed_hold ? IRQ_Mode_Falling : IRQ_Mode_Rising;
-                    break;
-
-                case Input_CycleStart:
-                    input->mode.pull_mode = settings->control_disable_pullup.cycle_start ? PullMode_None : PullMode_Up;
-                    input->mode.irq_mode = control_fei.cycle_start ? IRQ_Mode_Falling : IRQ_Mode_Rising;
-                    break;
-
-                case Input_SafetyDoor:
-                    input->mode.pull_mode = settings->control_disable_pullup.safety_door_ajar ? PullMode_None : PullMode_Up;
-                    input->mode.irq_mode = control_fei.safety_door_ajar ? IRQ_Mode_Falling : IRQ_Mode_Rising;
-                    break;
 
                 case Input_LimitX:
                 case Input_LimitX_2:
@@ -2408,10 +2420,7 @@ void settings_changed (settings_t *settings, settings_changed_flags_t changed)
         }
 
         hal.limits.enable(settings->limits.flags.hard_enabled, (axes_signals_t){0});
-
-#if AUX_CONTROLS_ENABLED
         aux_ctrl_irq_enable(settings, aux_irq_handler);
-#endif
     }
 }
 
@@ -2696,6 +2705,7 @@ static bool driver_setup (settings_t *settings)
      *************************/
 
     uint32_t i;
+    axes_signals_t st_enable = st_get_enable_out();
 
     // Switch on stepper driver power before enabling other output pins
     for(i = 0; i < sizeof(outputpin) / sizeof(output_signal_t); i++) {
@@ -2723,8 +2733,8 @@ static bool driver_setup (settings_t *settings)
                  outputpin[i].id == Output_SPICS ||
                   outputpin[i].id == Output_FlashCS ||
                    outputpin[i].id == Output_SdCardCS ||
-                    outputpin[i].group == PinGroup_StepperEnable)
-                outputpin[i].port->ODR |= GPIO_Init.Pin;
+                    (outputpin[i].group == PinGroup_StepperEnable && (st_enable.mask & xbar_fn_to_axismask(outputpin[i].id).mask)))
+                outputpin[i].port->BSRR = GPIO_Init.Pin;
 
             HAL_GPIO_Init(outputpin[i].port, &GPIO_Init);
         }
@@ -2735,26 +2745,12 @@ static bool driver_setup (settings_t *settings)
  // Stepper init
 
     STEPPER_TIMER_CLKEN();
-    STEPPER_TIMER->CR1 &= ~TIM_CR1_CEN;
-    STEPPER_TIMER->SR &= ~TIM_SR_UIF;
+    STEPPER_TIMER->CR1 = 0;
     STEPPER_TIMER->PSC = STEPPER_TIMER_DIV - 1;
-    STEPPER_TIMER->CNT = 0;
-    STEPPER_TIMER->CR1 |= TIM_CR1_DIR;
-    STEPPER_TIMER->DIER |= TIM_DIER_UIE;
+    STEPPER_TIMER->CR1 = TIM_CR1_DIR|TIM_CR1_ARPE;
 
-    HAL_NVIC_SetPriority(STEPPER_TIMER_IRQn, 0, 2);
+    HAL_NVIC_SetPriority(STEPPER_TIMER_IRQn, 0, 0);
     NVIC_EnableIRQ(STEPPER_TIMER_IRQn);
-
- // Single-shot 100 ns per tick
-
-    PULSE_TIMER_CLKEN();
-    PULSE_TIMER->CR1 |= TIM_CR1_OPM|TIM_CR1_DIR|TIM_CR1_CKD_1|TIM_CR1_ARPE|TIM_CR1_URS;
-    PULSE_TIMER->PSC = (HAL_RCC_GetPCLK1Freq() * 2) / 10000000UL - 1;
-    PULSE_TIMER->SR &= ~(TIM_SR_UIF|TIM_SR_CC1IF);
-    PULSE_TIMER->CNT = 0;
-
-    HAL_NVIC_SetPriority(PULSE_TIMER_IRQn, 0, 1);
-    NVIC_EnableIRQ(PULSE_TIMER_IRQn);
 
 #if SDCARD_SDIO
 
@@ -3027,7 +3023,7 @@ bool driver_init (void)
 #else
     hal.info = "STM32F401";
 #endif
-    hal.driver_version = "250311";
+    hal.driver_version = "250716";
     hal.driver_url = GRBL_URL "/STM32F4xx";
 #ifdef BOARD_NAME
     hal.board = BOARD_NAME;
@@ -3159,26 +3155,11 @@ bool driver_init (void)
 
 // driver capabilities, used for announcing and negotiating (with the core) driver functionality
 
-#ifndef RESET_PIN
-    hal.signals_cap.reset = Off;
-#elif ESTOP_ENABLE
-    hal.signals_cap.e_stop = On;
-    hal.signals_cap.reset = Off;
-#endif
-#ifndef FEED_HOLD_PIN
-    hal.signals_cap.feed_hold = Off;
-#endif
-#ifndef CYCLE_START_PIN
-    hal.signals_cap.cycle_start = Off;
-#endif
     hal.limits_cap = get_limits_cap();
     hal.home_cap = get_home_cap();
     hal.motor_fault_cap = get_motor_fault_cap();
 #if SPINDLE_ENCODER_ENABLE
     hal.driver_cap.spindle_encoder = On;
-#endif
-#if SPINDLE_SYNC_ENABLE
-    hal.driver_cap.spindle_sync = On;
 #endif
     hal.coolant_cap.bits = COOLANT_ENABLE;
     hal.driver_cap.software_debounce = On;
@@ -3193,6 +3174,8 @@ bool driver_init (void)
     uint32_t i;
     input_signal_t *input;
 
+    aux_assign_irq();
+
     for(i = 0; i < sizeof(inputpin) / sizeof(input_signal_t); i++) {
 
         input = &inputpin[i];
@@ -3204,22 +3187,18 @@ bool driver_init (void)
             case PinGroup_AuxInput:
                 if(aux_digital_in.pins.inputs == NULL)
                     aux_digital_in.pins.inputs = input;
-                input->user_port = aux_digital_in.n_pins++;
-                input->id = (pin_function_t)(Input_Aux0 + input->user_port);
-                input->mode.pull_mode = PullMode_Up;
-                input->cap.pull_mode = PullMode_UpDown;
-                if((input->cap.irq_mode = ((DRIVER_IRQMASK|aux_irq) & input->bit) ? IRQ_Mode_None : IRQ_Mode_Edges) != IRQ_Mode_None) {
+
+                aux_digital_in.n_pins++;
+
+                if(!(input->id >= Input_Aux0 && input->id <= Input_AuxMax)) {
+                    input->id = Input_Aux0 + input->user_port;
+                    aux_ctrl_remap_explicit(input->port, input->pin, input->user_port, input);
+                }
+
+                if((input->cap.debounce = input->cap.irq_mode != IRQ_Mode_None)) {
                     aux_irq |= input->bit;
                     pin_irq[__builtin_ffs(input->bit) - 1] = input;
                 }
-                input->cap.debounce = !!input->cap.irq_mode;
-#if AUX_CONTROLS_ENABLED
-                aux_ctrl_t *aux_remap;
-                if((aux_remap = aux_ctrl_remap_explicit(input->port, input->pin, input->user_port, input))) {
-                    if(aux_remap->function == Input_Probe && input->cap.irq_mode == IRQ_Mode_Edges)
-                        aux_remap->irq_mode = IRQ_Mode_Change;
-                }
-#endif
                 break;
 
             case PinGroup_AuxInputAnalog:
@@ -3295,9 +3274,8 @@ bool driver_init (void)
         ioports_init_analog(&aux_analog_in, &aux_analog_out);
 #endif
 
-#if AUX_CONTROLS_ENABLED
+    io_expanders_init();
     aux_ctrl_claim_ports(aux_claim_explicit, NULL);
-#endif
 
    extern bool aux_out_claim_explicit (aux_ctrl_out_t *aux_ctrl);
    aux_ctrl_claim_out_ports(aux_out_claim_explicit, NULL);
@@ -3319,7 +3297,7 @@ bool driver_init (void)
     static const sys_command_t boot_command_list[] = {
         {"DFU", enter_dfu, { .allow_blocking = On, .noargs = On }, { .str = "enter DFU bootloader" } },
   #ifdef UF2_BOOTLOADER
-    	{"UF2", enter_uf2, { .allow_blocking = On, .noargs = On }, { .str = "enter UF2 bootloader" } }
+        {"UF2", enter_uf2, { .allow_blocking = On, .noargs = On }, { .str = "enter UF2 bootloader" } }
   #endif
     };
 
@@ -3373,7 +3351,7 @@ bool driver_init (void)
     qei_enable = encoder_init(QEI_ENABLE);
 #endif
 
-#if defined(NEOPIXEL_SPI) || defined(NEOPIXEL_GPO)
+#if defined(NEOPIXEL_SPI) || defined(NEOPIXEL_PWM) || defined(NEOPIXEL_GPO)
     extern void neopixel_init (void);
     neopixel_init();
 #endif
@@ -3384,7 +3362,7 @@ bool driver_init (void)
     if(!hal.driver_cap.mpg_mode)
         hal.driver_cap.mpg_mode = stream_mpg_register(stream_open_instance(MPG_STREAM, 115200, NULL, NULL), false, NULL);
     if(hal.driver_cap.mpg_mode)
-        protocol_enqueue_foreground_task(mpg_enable, NULL);
+        task_run_on_startup(mpg_enable, NULL);
 #elif MPG_ENABLE == 2
     if(!hal.driver_cap.mpg_mode)
         hal.driver_cap.mpg_mode = stream_mpg_register(stream_open_instance(MPG_STREAM, 115200, NULL, NULL), false, stream_mpg_check_enable);
@@ -3403,39 +3381,43 @@ pin_group_pins_t *get_motor_fault_inputs (void)
 /* interrupt handlers */
 
 // Main stepper driver
-void STEPPER_TIMER_IRQHandler (void)
+ISR_CODE void STEPPER_TIMER_IRQHandler (void)
 {
-    if((STEPPER_TIMER->SR & TIM_SR_UIF) != 0) {     // check interrupt source
-        STEPPER_TIMER->SR = ~TIM_SR_UIF;            // clear UIF flag
+//    DIGITAL_OUT(AUXOUTPUT9_PORT, AUXOUTPUT9_PIN, 1);
+
+    // Delayed step pulse handler
+    if((STEPPER_TIMER->SR & STEPPER_TIMER->DIER) & TIM_SR_CC2IF) {
+
+        STEPPER_TIMER->DIER &= ~TIM_DIER_CC2IE;
+
+        _stepper_step_out(step_pulse.out);
+    }
+    // Step pulse off handler
+    else if((STEPPER_TIMER->SR & STEPPER_TIMER->DIER) & TIM_SR_CC1IF) {
+
+        STEPPER_TIMER->DIER &= ~TIM_DIER_CC1IE;
+
+        stepper_step_out((axes_signals_t){0});
+
+        if((STEPPER_TIMER->SR & TIM_SR_UIF) || STEPPER_TIMER->CNT < step_pulse.t_off_min) {
+            STEPPER_TIMER->CNT = step_pulse.t_off_min;
+            NVIC_ClearPendingIRQ(STEPPER_TIMER_IRQn);
+        }
+
+        STEPPER_TIMER->SR &= ~TIM_SR_CC1IF;
+    }
+    // Stepper timeout handler
+    else if(STEPPER_TIMER->SR & TIM_SR_UIF) {
+        STEPPER_TIMER->SR = 0;
         hal.stepper.interrupt_callback();
     }
-}
 
-/* The Stepper Port Reset Interrupt: This interrupt handles the falling edge of the step
-   pulse. This should always trigger before the next general stepper driver interrupt and independently
-   finish, if stepper driver interrupts is disabled after completing a move.
-   NOTE: Interrupt collisions between the serial and stepper interrupts can cause delays by
-   a few microseconds, if they execute right before one another. Not a big deal, but can
-   cause issues at high step rates if another high frequency asynchronous interrupt is added.
-*/
-void PULSE_TIMER_IRQHandler (void)
-{
-    uint32_t irq = PULSE_TIMER->SR & PULSE_TIMER->DIER;
-
-    PULSE_TIMER->SR &= ~(TIM_SR_UIF|TIM_SR_CC1IF);  // Clear IRQ flags
-
-    if(irq & TIM_SR_CC1IF) {                        // Delayed step pulse?
-        PULSE_TIMER->DIER = TIM_DIER_UIE;
-        PULSE_TIMER->ARR = PULSE_TIMER->CCR1;
-        stepperSetStepOutputs(step_pulse.out);      // Yes, begin step pulse
-        PULSE_TIMER->CR1 |= TIM_CR1_CEN;
-    } else
-        stepperSetStepOutputs((axes_signals_t){0}); // else end step pulse
+//    DIGITAL_OUT(AUXOUTPUT9_PORT, AUXOUTPUT9_PIN, 0);
 }
 
 #if SPINDLE_ENCODER_ENABLE
 
-void RPM_COUNTER_IRQHandler (void)
+ISR_CODE void RPM_COUNTER_IRQHandler (void)
 {
     spindle_encoder.spin_lock = true;
 
@@ -3457,7 +3439,7 @@ void RPM_COUNTER_IRQHandler (void)
 
 #if RPM_TIMER_N != 2
 
-void RPM_TIMER_IRQHandler (void)
+ISR_CODE void RPM_TIMER_IRQHandler (void)
 {
     RPM_TIMER->SR &= ~TIM_SR_UIF;
 
@@ -3547,9 +3529,7 @@ void EXTI0_IRQHandler(void)
 
     if(ifg) {
         __HAL_GPIO_EXTI_CLEAR_IT(ifg);
-#if CONTROL_MASK & (1<<0)
-        hal.control.interrupt_callback(systemGetState());
-#elif (LIMIT_MASK|SD_DETECT_BIT) & (1<<0)
+#if (LIMIT_MASK|SD_DETECT_BIT) & (1<<0)
         core_pin_irq(ifg);
 #elif SPI_IRQ_BIT & (1<<0)
         if(spi_irq.callback)
@@ -3579,9 +3559,7 @@ void EXTI1_IRQHandler(void)
 
     if(ifg) {
         __HAL_GPIO_EXTI_CLEAR_IT(ifg);
-#if CONTROL_MASK & (1<<1)
-        hal.control.interrupt_callback(systemGetState());
-#elif (LIMIT_MASK|SD_DETECT_BIT) & (1<<1)
+#if (LIMIT_MASK|SD_DETECT_BIT) & (1<<1)
         core_pin_irq(ifg);
 #elif SPI_IRQ_BIT & (1<<1)
         if(spi_irq.callback)
@@ -3611,9 +3589,7 @@ void EXTI2_IRQHandler(void)
 
     if(ifg) {
         __HAL_GPIO_EXTI_CLEAR_IT(ifg);
-#if CONTROL_MASK & (1<<2)
-        hal.control.interrupt_callback(systemGetState());
-#elif (LIMIT_MASK|SD_DETECT_BIT) & (1<<2)
+#if (LIMIT_MASK|SD_DETECT_BIT) & (1<<2)
         core_pin_irq(ifg);
 #elif SPI_IRQ_BIT & (1<<2)
         if(spi_irq.callback)
@@ -3643,9 +3619,7 @@ void EXTI3_IRQHandler(void)
 
     if(ifg) {
         __HAL_GPIO_EXTI_CLEAR_IT(ifg);
-#if CONTROL_MASK & (1<<3)
-        hal.control.interrupt_callback(systemGetState());
-#elif (LIMIT_MASK|SD_DETECT_BIT) & (1<<3)
+#if (LIMIT_MASK|SD_DETECT_BIT) & (1<<3)
         core_pin_irq(ifg);
 #elif SPI_IRQ_BIT & (1<<3)
         if(spi_irq.callback)
@@ -3675,9 +3649,7 @@ void EXTI4_IRQHandler(void)
 
     if(ifg) {
         __HAL_GPIO_EXTI_CLEAR_IT(ifg);
-#if CONTROL_MASK & (1<<4)
-        hal.control.interrupt_callback(systemGetState());
-#elif (LIMIT_MASK|SD_DETECT_BIT) & (1<<4)
+#if (LIMIT_MASK|SD_DETECT_BIT) & (1<<4)
         core_pin_irq(ifg);
 #elif SPI_IRQ_BIT & (1<<4)
         if(spi_irq.callback)
@@ -3730,10 +3702,6 @@ void EXTI9_5_IRQHandler(void)
                 qei_select_handler();
         }
 #endif
-#if CONTROL_MASK & 0x03E0
-        if(ifg & CONTROL_MASK)
-            hal.control.interrupt_callback(systemGetState());
-#endif
 #if (LIMIT_MASK|SD_DETECT_BIT) & 0x03E0
         if(ifg & (LIMIT_MASK|SD_DETECT_BIT))
             core_pin_irq(ifg);
@@ -3775,10 +3743,6 @@ void EXTI15_10_IRQHandler(void)
 #if QEI_ENABLE && ((QEI_A_BIT|QEI_B_BIT) & 0xFC00)
         if(ifg & (QEI_A_BIT|QEI_B_BIT))
             qei_update();
-#endif
-#if CONTROL_MASK & 0xFC00
-        if(ifg & CONTROL_MASK)
-            hal.control.interrupt_callback(systemGetState());
 #endif
 #if (LIMIT_MASK|SD_DETECT_BIT) & 0xFC00
         if(ifg & (LIMIT_MASK|SD_DETECT_BIT))
