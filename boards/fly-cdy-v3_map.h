@@ -19,8 +19,8 @@
   along with GrblHAL. If not, see <http://www.gnu.org/licenses/>.
 */
 
-#if N_ABC_MOTORS > 2
-#error "BTT SKR-2 supports 5 motors max."
+#if N_ABC_MOTORS > 3
+#error "FLY-CDY supports 6 motors max."
 #endif
 
 #if IS_NUCLEO_DEVKIT
@@ -98,7 +98,7 @@
 #endif
 
 // Define ganged axis or B axis step pulse and step direction output pins.
-#if N_ABC_MOTORS == 2
+#if N_ABC_MOTORS > 2
 #define M4_AVAILABLE                // E1
 #define M4_STEP_PORT                GPIOE
 #define M4_STEP_PIN                 2
@@ -110,12 +110,29 @@
 //#define M4_LIMIT_PIN                15                          // orig 0
 #endif
 
+// Define ganged axis or B axis step pulse and step direction output pins.
+#if N_ABC_MOTORS == 3
+#define M5_AVAILABLE                // E1
+#define M5_STEP_PORT                GPIOE
+#define M5_STEP_PIN                 0
+#define M5_DIRECTION_PORT           GPIOA
+#define M5_DIRECTION_PIN            15
+#define M5_ENABLE_PORT              GPIOD
+#define M5_ENABLE_PIN               0
+//#define M5_LIMIT_PORT               GPIOE                       
+//#define M5_LIMIT_PIN                15                          
+#endif
+
 #define AUXOUTPUT0_PORT             GPIOB // Laser/Spindle PWM
-#define AUXOUTPUT0_PIN              9
-#define AUXOUTPUT1_PORT             GPIOA // Spindle direction, FAN2
-#define AUXOUTPUT1_PIN              0
-#define AUXOUTPUT2_PORT             GPIOA // Spindle enable, FAN1
-#define AUXOUTPUT2_PIN              1
+#define AUXOUTPUT0_PIN              10
+#define AUXOUTPUT1_PORT             GPIOD // Spindle direction, FAN2
+#define AUXOUTPUT1_PIN              13
+#define AUXOUTPUT2_PORT             GPIOD // Spindle enable, E0HEAT
+#define AUXOUTPUT2_PIN              12
+#define COPROC_RESET_PORT           GPIOE //None of these are correct yet
+#define COPROC_BOOT0_PORT           GPIOE
+#define COPROC_RESET_PIN            11
+#define COPROC_BOOT0_PIN            10
 
 // Define driver spindle pins
 #if DRIVER_SPINDLE_ENABLE
@@ -134,15 +151,15 @@
 // Define flood and mist coolant enable output pins.
 #define COOLANT_FLOOD_PORT          GPIOD
 #define COOLANT_FLOOD_PIN           12                           // HEAT0
-#define COOLANT_MIST_PORT           GPIOD
-#define COOLANT_MIST_PIN            13                           // HEAT1
+#define COOLANT_MIST_PORT           GPIOA
+#define COOLANT_MIST_PIN            0                           // HEAT1
 
 // Define user-control controls (cycle start, reset, feed hold) input pins.
 // These are all available on EXP2 along with electrical RESET* (EXP2-8)
 #define CONTROL_PORT                GPIOA
 #define RESET_PIN                   4                           // Exp2-4
-#define FEED_HOLD_PIN               5                           // Exp2-2
-#define CYCLE_START_PIN             6                           // Exp2-1
+#define FEED_HOLD_PIN               13                           // Exp2-2
+#define CYCLE_START_PIN             5                           // Exp2-1
 #define CONTROL_INMODE              GPIO_BITBAND
 
 #define AUXINPUT0_PORT              GPIOA
@@ -175,13 +192,13 @@
 
 #if ETHERNET_ENABLE
 #undef SPI_ENABLE
-#define SPI_ENABLE 					1 // GPIOA: SCK = 5, MISO = 6, MOSI = 7
-#define SPI_CS_PORT                 GPIOB
-#define SPI_CS_PIN                  12                              // ESP-CS
-#define SPI_IRQ_PORT                GPIOB
-#define SPI_IRQ_PIN                 11                              // ESP-IO4
-#define SPI_RST_PORT                GPIOC
-#define SPI_RST_PIN                 14                              // ESP-RST
+#define SPI_ENABLE 					0 // GPIOA: SCK = 5, MISO = 6, MOSI = 7
+//#define SPI_CS_PORT                 GPIOB
+//#define SPI_CS_PIN                  12                              // ESP-CS
+//#define SPI_IRQ_PORT                GPIOB
+//#define SPI_IRQ_PIN                 9                              // ESP-IO4
+//#define SPI_RST_PORT                GPIOC
+//#define SPI_RST_PIN                 14                              // ESP-RST
 #endif
 
 #if TRINAMIC_UART_ENABLE
@@ -204,6 +221,11 @@
 #ifdef  M4_AVAILABLE
 #define MOTOR_UARTM4_PORT           GPIOD
 #define MOTOR_UARTM4_PIN            5
+#endif
+
+#ifdef  M5_AVAILABLE
+#define MOTOR_UARTM5_PORT           GPIOE
+#define MOTOR_UARTM5_PIN            9
 #endif
 
 #elif TRINAMIC_SPI_ENABLE

@@ -213,7 +213,7 @@
       "MAP": "boards/fly-cdy-v3_map.h",
       "caps": {
         "uart": 0,
-        "axes": 5,
+        "axes": 6,
         "serial_ports": 2,
         "digital_in": 1,
         "sdcard": 1,
