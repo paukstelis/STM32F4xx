@@ -160,13 +160,22 @@ static input_signal_t inputpin[] = {
 #ifdef X2_LIMIT_PIN
     { .id = Input_LimitX_2,       .port = X2_LIMIT_PORT,      .pin = X2_LIMIT_PIN,        .group = PinGroup_Limit },
 #endif
+#ifdef X_LIMIT_PIN_MAX
+    { .id = Input_LimitX_Max,     .port = X_LIMIT_PORT_MAX,   .pin = X_LIMIT_PIN_MAX,     .group = PinGroup_Limit },
+#endif
     { .id = Input_LimitY,         .port = Y_LIMIT_PORT,       .pin = Y_LIMIT_PIN,         .group = PinGroup_Limit },
 #ifdef Y2_LIMIT_PIN
     { .id = Input_LimitY_2,       .port = Y2_LIMIT_PORT,      .pin = Y2_LIMIT_PIN,        .group = PinGroup_Limit },
 #endif
+#ifdef Y_LIMIT_PIN_MAX
+    { .id = Input_LimitY_Max,     .port = Y_LIMIT_PORT_MAX,   .pin = Y_LIMIT_PIN_MAX,     .group = PinGroup_Limit },
+#endif
     { .id = Input_LimitZ,         .port = Z_LIMIT_PORT,       .pin = Z_LIMIT_PIN,         .group = PinGroup_Limit },
 #ifdef Z2_LIMIT_PIN
     { .id = Input_LimitZ_2,       .port = Z2_LIMIT_PORT,      .pin = Z2_LIMIT_PIN,        .group = PinGroup_Limit },
+#endif
+#ifdef Z_LIMIT_PIN_MAX
+    { .id = Input_LimitZ_Max,     .port = Z_LIMIT_PORT_MAX,   .pin = Z_LIMIT_PIN_MAX,     .group = PinGroup_Limit },
 #endif
 #ifdef A_LIMIT_PIN
     { .id = Input_LimitA,         .port = A_LIMIT_PORT,       .pin = A_LIMIT_PIN,         .group = PinGroup_Limit },
@@ -440,12 +449,6 @@ static output_signal_t outputpin[] = {
 #endif
 #ifdef SPI_RST_PORT
     { .id = Output_SPIRST,          .port = SPI_RST_PORT,           .pin = SPI_RST_PIN,             .group = PinGroup_SPI },
-#endif
-#if defined(LED_PORT) && defined(NEOPIXEL_GPO)
-    { .id = Output_LED0_Adressable, .port = LED_PORT,               .pin = LED_PIN,                 .group = PinGroup_LED },
-#endif
-#if defined(LED1_PORT) && defined(NEOPIXEL_GPO)
-    { .id = Output_LED1_Adressable, .port = LED1_PORT,              .pin = LED1_PIN,                .group = PinGroup_LED },
 #endif
 #ifdef LED_R_PORT
     { .id = Output_LED_R,           .port = LED_R_PORT,             .pin = LED_R_PIN,               .group = PinGroup_LED },
@@ -3023,7 +3026,7 @@ bool driver_init (void)
 #else
     hal.info = "STM32F401";
 #endif
-    hal.driver_version = "250716";
+    hal.driver_version = "250825";
     hal.driver_url = GRBL_URL "/STM32F4xx";
 #ifdef BOARD_NAME
     hal.board = BOARD_NAME;
@@ -3351,9 +3354,19 @@ bool driver_init (void)
     qei_enable = encoder_init(QEI_ENABLE);
 #endif
 
-#if defined(NEOPIXEL_SPI) || defined(NEOPIXEL_PWM) || defined(NEOPIXEL_GPO)
-    extern void neopixel_init (void);
+#if defined(NEOPIXEL_SPI)
+    extern void neopixel_spi_init (void);
     neopixel_init();
+#endif
+
+#if defined(NEOPIXEL_PWM)
+    extern void neopixel_pwm_init (void);
+    neopixel_pwm_init();
+#endif
+
+#if defined(NEOPIXEL_GPO)
+    extern void neopixel_gpo_init (void);
+    neopixel_gpo_init();
 #endif
 
 #include "grbl/plugins_init.h"
