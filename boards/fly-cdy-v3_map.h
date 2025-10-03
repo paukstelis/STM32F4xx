@@ -98,7 +98,7 @@
 #endif
 
 // Define ganged axis or B axis step pulse and step direction output pins.
-#if N_ABC_MOTORS > 2
+#if N_ABC_MOTORS > 1
 #define M4_AVAILABLE                // E1
 #define M4_STEP_PORT                GPIOE
 #define M4_STEP_PIN                 2
@@ -124,15 +124,22 @@
 #endif
 
 #define AUXOUTPUT0_PORT             GPIOB // Laser/Spindle PWM
-#define AUXOUTPUT0_PIN              10
-#define AUXOUTPUT1_PORT             GPIOD // Spindle direction, FAN2
+#define AUXOUTPUT0_PIN              9
+#define AUXOUTPUT1_PORT             GPIOD //E1HEAT
 #define AUXOUTPUT1_PIN              13
-#define AUXOUTPUT2_PORT             GPIOD // Spindle enable, E0HEAT
+#define AUXOUTPUT2_PORT             GPIOD //E0HEAT
 #define AUXOUTPUT2_PIN              12
-#define COPROC_RESET_PORT           GPIOE //None of these are correct yet
-#define COPROC_BOOT0_PORT           GPIOE
-#define COPROC_RESET_PIN            11
-#define COPROC_BOOT0_PIN            10
+#define AUXOUTPUT3_PORT             GPIOA // FANO
+#define AUXOUTPUT3_PIN              0
+#define AUXOUTPUT4_PORT             GPIOD // E2HEAT
+#define AUXOUTPUT4_PIN              14
+#define AUXOUTPUT0_PWM_PORT         GPIOD // Neopixel
+#define AUXOUTPUT0_PWM_PIN          15
+
+//#define COPROC_RESET_PORT           GPIOE //None of these are correct yet
+//#define COPROC_BOOT0_PORT           GPIOE
+//#define COPROC_RESET_PIN            11
+//#define COPROC_BOOT0_PIN            10
 
 // Define driver spindle pins
 #if DRIVER_SPINDLE_ENABLE
@@ -149,23 +156,38 @@
 #endif //DRIVER_SPINDLE_ENABLE
 
 // Define flood and mist coolant enable output pins.
-#define COOLANT_FLOOD_PORT          GPIOD
-#define COOLANT_FLOOD_PIN           12                           // HEAT0
-#define COOLANT_MIST_PORT           GPIOA
-#define COOLANT_MIST_PIN            0                           // HEAT1
-
-// Define user-control controls (cycle start, reset, feed hold) input pins.
-// These are all available on EXP2 along with electrical RESET* (EXP2-8)
-#define CONTROL_PORT                GPIOA
-#define RESET_PIN                   4                           // Exp2-4
-#define FEED_HOLD_PIN               13                           // Exp2-2
-#define CYCLE_START_PIN             5                           // Exp2-1
-#define CONTROL_INMODE              GPIO_BITBAND
+#define COOLANT_FLOOD_PORT          AUXOUTPUT1_PORT
+#define COOLANT_FLOOD_PIN           AUXOUTPUT1_PIN                          
+#define COOLANT_MIST_PORT           AUXOUTPUT3_PORT
+#define COOLANT_MIST_PIN            AUXOUTPUT3_PIN                           
 
 #define AUXINPUT0_PORT              GPIOA
 #define AUXINPUT0_PIN               7                           // EXP2-6
 #define AUXINPUT1_PORT              GPIOC
-#define AUXINPUT1_PIN               2                         // BLTouch PE6
+#define AUXINPUT1_PIN               2                         // BLTouch PC2
+#define AUXINPUT3_PORT              GPIOA
+#define AUXINPUT3_PIN               4
+#define AUXINPUT4_PORT              GPIOA
+#define AUXINPUT4_PIN               13                         //5 for old version
+#define AUXINPUT5_PORT              GPIOA
+#define AUXINPUT5_PIN               5                          //6 for old version
+
+// Define user-control controls (cycle start, reset, feed hold) input pins.
+// These are all available on EXP2 along with electrical RESET* (EXP2-8)
+#if CONTROL_ENABLE & CONTROL_HALT
+#define RESET_PORT                  AUXINPUT3_PORT
+#define RESET_PIN                   AUXINPUT3_PIN
+#endif
+#if CONTROL_ENABLE & CONTROL_FEED_HOLD
+#define FEED_HOLD_PORT              AUXINPUT4_PORT
+#define FEED_HOLD_PIN               AUXINPUT4_PIN
+#endif
+#if CONTROL_ENABLE & CONTROL_CYCLE_START
+#define CYCLE_START_PORT            AUXINPUT5_PORT
+#define CYCLE_START_PIN             AUXINPUT5_PIN
+#endif
+
+
 
 #if PROBE_ENABLE
 #define PROBE_PORT                  AUXINPUT1_PORT
@@ -261,6 +283,11 @@
 #ifdef  M4_AVAILABLE
 #define MOTOR_CSM4_PORT             GPIOD
 #define MOTOR_CSM4_PIN              5
+#endif
+
+#ifdef  M5_AVAILABLE
+#define MOTOR_CS54_PORT             GPIOE
+#define MOTOR_CS54_PIN              9
 #endif
 
 #endif
