@@ -167,6 +167,8 @@
   #include "boards/fly-cdy-v3_map.h"
 #elif defined(BOARD_BTT_SKR_20_DAC)
   #include "boards/btt_skr_2.0_dac_map.h"
+#elif defined(BOARD_BTT_OCTOPUS_PRO)
+  #include "boards/btt_octopus_pro_map.h"
 #elif defined(BOARD_FYSETC_S6)
   #include "boards/fysetc_s6_map.h"
 #elif defined(BOARD_PROTONEER_3XX)
