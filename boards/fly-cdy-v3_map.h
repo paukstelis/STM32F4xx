@@ -40,7 +40,7 @@
 //#if ETHERNET_ENABLE
 //#define SPI_PORT        2   // GPIOB, SCK_PIN = 13, MISO_PIN = 14, MOSI_PIN = 15
 //#endif
-
+#define SPI_PORT 					          13
 #if TRINAMIC_SPI_ENABLE && ETHERNET_ENABLE
 #error "Trinamic SPI driver plugin and networking plugins cannot be enabled together!"
 #endif
@@ -58,25 +58,25 @@
 #define X_ENABLE_PORT               GPIOC
 #define X_ENABLE_PIN                1
 #define X_LIMIT_PORT                GPIOC
-#define X_LIMIT_PIN                 7                           // X- Limit
+#define X_LIMIT_PIN                 6                           // X- Limit
 
 #define Y_STEP_PORT                 GPIOE
-#define Y_STEP_PIN                  1                   // Y
-#define Y_DIRECTION_PORT            GPIOD
-#define Y_DIRECTION_PIN             3
-#define Y_ENABLE_PORT               GPIOD
-#define Y_ENABLE_PIN                4
+#define Y_STEP_PIN                  4                   // Y
+#define Y_DIRECTION_PORT            GPIOC
+#define Y_DIRECTION_PIN             13
+#define Y_ENABLE_PORT               GPIOC
+#define Y_ENABLE_PIN                14
 #define Y_LIMIT_PORT                GPIOD
-#define Y_LIMIT_PIN                 11                           // Y- Limit
+#define Y_LIMIT_PIN                 10                           // Y- Limit
 
 #define Z_STEP_PORT                 GPIOE
-#define Z_STEP_PIN                  4                  // Z
-#define Z_DIRECTION_PORT            GPIOC
-#define Z_DIRECTION_PIN             13
-#define Z_ENABLE_PORT               GPIOC
-#define Z_ENABLE_PIN                14
-#define Z_LIMIT_PORT                GPIOD
-#define Z_LIMIT_PIN                 10  
+#define Z_STEP_PIN                  3                  // Z
+#define Z_DIRECTION_PORT            GPIOB
+#define Z_DIRECTION_PIN             7
+#define Z_ENABLE_PORT               GPIOB
+#define Z_ENABLE_PIN                8
+#define Z_LIMIT_PORT                GPIOB
+#define Z_LIMIT_PIN                 11  
 
 #define STEP_OUTMODE                GPIO_BITBAND
 //#define STEP_PINMODE                PINMODE_OD // Uncomment for open drain outputs
@@ -133,6 +133,7 @@
 #define AUXOUTPUT3_PIN              0
 #define AUXOUTPUT4_PORT             GPIOD // E2HEAT
 #define AUXOUTPUT4_PIN              14
+
 #define AUXOUTPUT0_PWM_PORT         GPIOD // Neopixel
 #define AUXOUTPUT0_PWM_PIN          15
 
@@ -143,8 +144,8 @@
 
 // Define driver spindle pins
 #if DRIVER_SPINDLE_ENABLE
-#define SPINDLE_ENABLE_PORT         AUXOUTPUT2_PORT
-#define SPINDLE_ENABLE_PIN          AUXOUTPUT2_PIN
+#define SPINDLE_ENABLE_PORT         AUXOUTPUT3_PORT
+#define SPINDLE_ENABLE_PIN          AUXOUTPUT3_PIN
 #if DRIVER_SPINDLE_PWM_ENABLE
 #define SPINDLE_PWM_PORT            AUXOUTPUT0_PORT
 #define SPINDLE_PWM_PIN             AUXOUTPUT0_PIN
@@ -158,8 +159,8 @@
 // Define flood and mist coolant enable output pins.
 #define COOLANT_FLOOD_PORT          AUXOUTPUT1_PORT
 #define COOLANT_FLOOD_PIN           AUXOUTPUT1_PIN                          
-#define COOLANT_MIST_PORT           AUXOUTPUT3_PORT
-#define COOLANT_MIST_PIN            AUXOUTPUT3_PIN                           
+#define COOLANT_MIST_PORT           AUXOUTPUT2_PORT
+#define COOLANT_MIST_PIN            AUXOUTPUT2_PIN                           
 
 #define AUXINPUT0_PORT              GPIOA
 #define AUXINPUT0_PIN               7                           // EXP2-6
@@ -187,8 +188,6 @@
 #define CYCLE_START_PIN             AUXINPUT5_PIN
 #endif
 
-
-
 #if PROBE_ENABLE
 #define PROBE_PORT                  AUXINPUT1_PORT
 #define PROBE_PIN                   AUXINPUT1_PIN
@@ -212,28 +211,27 @@
 #define SDCARD_SDIO                 1
 #endif
 
-#if ETHERNET_ENABLE
-#undef SPI_ENABLE
-#define SPI_ENABLE 					0 // GPIOA: SCK = 5, MISO = 6, MOSI = 7
+//#if ETHERNET_ENABLE
+//#undef SPI_ENABLE
+//#define SPI_ENABLE 					          13// GPIOB: SCK = 3, MISO = 4, MOSI = 5
 //#define SPI_CS_PORT                 GPIOB
-//#define SPI_CS_PIN                  12                              // ESP-CS
+//#define SPI_CS_PIN                  5                              // ESP-CS
 //#define SPI_IRQ_PORT                GPIOB
 //#define SPI_IRQ_PIN                 9                              // ESP-IO4
 //#define SPI_RST_PORT                GPIOC
 //#define SPI_RST_PIN                 14                              // ESP-RST
-#endif
+//#endif
 
 #if TRINAMIC_UART_ENABLE
-
 #undef TRINAMIC_UART_ENABLE
 #define TRINAMIC_UART_ENABLE        2
 
 #define MOTOR_UARTX_PORT            GPIOC
 #define MOTOR_UARTX_PIN             15
-#define MOTOR_UARTY_PORT            GPIOD
-#define MOTOR_UARTY_PIN             1
-#define MOTOR_UARTZ_PORT            GPIOA
-#define MOTOR_UARTZ_PIN             8
+#define MOTOR_UARTY_PORT            GPIOA
+#define MOTOR_UARTY_PIN             8
+#define MOTOR_UARTZ_PORT            GPIOB
+#define MOTOR_UARTZ_PIN             6
 
 #ifdef  M3_AVAILABLE
 #define MOTOR_UARTM3_PORT           GPIOB
@@ -270,10 +268,10 @@
 
 #define MOTOR_CSX_PORT              GPIOC
 #define MOTOR_CSX_PIN               15
-#define MOTOR_CSY_PORT              GPIOD
-#define MOTOR_CSY_PIN               1
-#define MOTOR_CSZ_PORT              GPIOA
-#define MOTOR_CSZ_PIN               8
+#define MOTOR_CSY_PORT              GPIOA
+#define MOTOR_CSY_PIN               8
+#define MOTOR_CSZ_PORT              GPIOB
+#define MOTOR_CSZ_PIN               6
 
 #ifdef  M3_AVAILABLE
 #define MOTOR_CSM3_PORT             GPIOB
